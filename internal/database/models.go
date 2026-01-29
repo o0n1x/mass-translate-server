@@ -5,10 +5,32 @@
 package database
 
 import (
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+type Log struct {
+	ID           uuid.UUID
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	IsSuccessful bool
+	Cached       bool
+	Error        sql.NullString
+	RequestID    uuid.UUID
+}
+
+type Request struct {
+	ID        uuid.UUID
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Provider  string
+	ReqType   string
+	FromLang  string
+	ToLang    string
+	UserID    uuid.UUID
+}
 
 type User struct {
 	ID        uuid.UUID

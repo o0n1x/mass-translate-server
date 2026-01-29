@@ -1,19 +1,19 @@
 General non-specific stuff ill do
 
 - ### api
-    - translate (each provider has their own path)
+    - DONE translate (each provider has their own path)
     - login (with refresh paths)
-    - healthcheck
+    - DONE healthcheck
     - restricted registeration
 - ### auth
     - password with agron2id encryption
     - JWT for sessions
     - probably wont need refresh tokens as this is a per sesion use with api costs
 - ### cache
-    - use redis for cacheing
-    - cache api requests for a set duration
+    - DONE use redis for cacheing
+    - DONE cache api requests for a set duration
 - ### database
-    - use postgresql
+    - DONE use postgresql
     - store users and passwords
 - ### login
     - admin user (usually the server owner) can create new users if needed
@@ -21,7 +21,7 @@ General non-specific stuff ill do
 
 possible stuff that i may do:
 
-- ### logging with Prometheus
+- ### metrics with Prometheus
     - log all metrics needed
     - use graphana for visualization
 - ### async document translation
@@ -35,13 +35,14 @@ possible stuff that i may do:
     - Refactor all errors to use a the custom error package
     - the error package will be in the mass-translate-package 
     - use fmt.Errorf("%s | %w : %s",package,err,x) format with error constants in the custom err package
+    - store error within logging in PostgreSQL
 
 ### api endpoints by importance:
 
-- /v1/deepl/translate
+- DONE /v1/deepl/translate  
 - /v1/deepl/documents (GET /id = check status or get result, DELETE /id = delete document)
 - /v1/auth/login
 - /v1/admin/users (POST = create , GET = get users , DELETE = delete user, GET /id query id)
 - /v1/admin/logs  (GET?n=10 get top n logs , GET /{id} query log id)
-- /v1/healthcheck
+- DONE /v1/healthcheck
 
