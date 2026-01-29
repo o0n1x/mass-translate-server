@@ -24,12 +24,14 @@ func main() {
 	}
 
 	//dbms := database.New(db)
-
+	cfg := api.ApiConfig{}
+	cfg.DeeplClientAPI = os.Getenv("DEEPL_API")
 	mux := http.NewServeMux()
 
 	mux.Handle(filepathRoot, http.StripPrefix("/app/", http.FileServer(http.Dir("."))))
 
 	mux.HandleFunc("GET /api/health", api.HealthCheck)
+	mux.HandleFunc("POST /api/deepl/translate", cfg.DeeplTranslate)
 
 	s := &http.Server{
 		Handler: mux,

@@ -1,1 +1,12 @@
 GET http://localhost:8080/api/health HTTP/1.1
+
+###
+
+POST http://localhost:8080/api/deepl/translate HTTP/1.1
+Content-Type: application/json
+
+{
+    "text": ["hello my name is fares"],
+    "source_lang": "EN",
+    "target_lang": "ZH-HANT"
+}

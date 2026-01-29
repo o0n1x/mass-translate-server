@@ -24,7 +24,12 @@ possible stuff that i may do:
 - ### logging with Prometheus
     - log all metrics needed
     - use graphana for visualization
-
+- ### async document translation
+    - POST /translate returns {document_id, status: pending}
+    - GET /documents/{id} returns status
+    - GET /documents/{id}/download returns file
+    - store metadata in postgres
+    - store binary in redis with TTL
 
 ### api endpoints by importance:
 
