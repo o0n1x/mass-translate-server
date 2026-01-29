@@ -13,7 +13,10 @@ import (
 	"github.com/o0n1x/mass-translate-package/lang"
 	"github.com/o0n1x/mass-translate-package/provider"
 	"github.com/o0n1x/mass-translate-package/provider/deepl"
+	"github.com/o0n1x/mass-translate-package/translator"
+	"github.com/o0n1x/mass-translate-server/internal/cache"
 	"github.com/o0n1x/mass-translate-server/internal/database"
+	"github.com/redis/go-redis/v9"
 )
 
 // constants
@@ -21,6 +24,7 @@ const MAXFILESIZE = 50 << 20
 
 type ApiConfig struct {
 	DB             *database.Queries
+	Redis          *redis.Client
 	Platform       string
 	DeeplClient    *deepl.DeepLClient
 	DeeplClientAPI string
@@ -67,12 +71,25 @@ func (cfg *ApiConfig) textTranslateHelper(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	res, err := cfg.DeeplClient.Translate(r.Context(), provider.Request{
+	req := provider.Request{
 		ReqType: format.Text,
 		Text:    params.Text,
 		From:    lang.Language(params.SourceLang),
 		To:      lang.Language(params.TargetLang),
-	})
+	}
+
+	cached, hit, err := cache.GetCache(r.Context(), cfg.Redis, provider.DeepL, req)
+	if err != nil {
+		log.Printf("cache error: %v", err)
+	}
+	if hit {
+		log.Print("Cache HIT")
+		w.Header().Set("X-Cache", "HIT")
+		textRespond(w, cached.Text)
+		return
+	}
+
+	res, err := cfg.DeeplClient.Translate(r.Context(), req)
 	if err != nil {
 		if strings.Contains(err.Error(), "Invalid Source Language") {
 			http.Error(w, "Error translating: Invalid Source Language", http.StatusBadRequest)
@@ -85,10 +102,21 @@ func (cfg *ApiConfig) textTranslateHelper(w http.ResponseWriter, r *http.Request
 		log.Printf("Error translating: %v", err)
 		return
 	}
+
+	err = cache.SetCache(r.Context(), cfg.Redis, provider.DeepL, req, res)
+	if err != nil {
+		log.Printf("cache set error: %v", err)
+	}
+
+	w.Header().Set("X-Cache", "MISS")
+	textRespond(w, res.Text)
+
+}
+func textRespond(w http.ResponseWriter, text []string) {
 	type TextResponse struct {
 		Translations []string `json:"translation"`
 	}
-	textres := TextResponse{Translations: res.Text}
+	textres := TextResponse{Translations: text}
 	dat, err := json.Marshal(textres)
 	if err != nil {
 		http.Error(w, "Error marshalling JSON", http.StatusInternalServerError)
@@ -97,9 +125,9 @@ func (cfg *ApiConfig) textTranslateHelper(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(dat)
-
 }
 
+// TODO: limit how large the cache can be. atm even a 1GB file will be cached
 func (cfg *ApiConfig) fileTranslateHelper(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, MAXFILESIZE)
 
@@ -135,7 +163,18 @@ func (cfg *ApiConfig) fileTranslateHelper(w http.ResponseWriter, r *http.Request
 		To:       lang.Language(r.FormValue("target_lang")),
 	}
 
-	res, err := cfg.DeeplClient.Translate(r.Context(), req)
+	cached, hit, err := cache.GetCache(r.Context(), cfg.Redis, provider.DeepL, req)
+	if err != nil {
+		log.Printf("cache error: %v", err)
+	}
+	if hit {
+		log.Print("Cache HIT")
+		w.Header().Set("X-Cache", "HIT")
+		fileRespond(w, cached.Binary, req.FileName)
+		return
+	}
+
+	res, err := translator.Translate(r.Context(), req, cfg.DeeplClient)
 	if err != nil {
 		if strings.Contains(err.Error(), "Invalid Source Language") {
 			http.Error(w, "Error translating: Invalid Source Language", http.StatusBadRequest)
@@ -148,9 +187,20 @@ func (cfg *ApiConfig) fileTranslateHelper(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	err = cache.SetCache(r.Context(), cfg.Redis, provider.DeepL, req, res)
+	if err != nil {
+		log.Printf("cache set error: %v", err)
+	}
+
+	w.Header().Set("X-Cache", "MISS")
+	fileRespond(w, res.Binary, req.FileName)
+
+}
+
+func fileRespond(w http.ResponseWriter, binary []byte, filename string) {
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"translateed_%s\"", req.FileName))
-	w.Write(res.Binary)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"translated_%s\"", filename))
+	w.Write(binary)
 }
 
 func isFileAllowedDeepl(filename string) bool {
