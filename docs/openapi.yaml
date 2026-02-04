@@ -1,0 +1,448 @@
+openapi: 3.0.4
+info:
+  title: Mass-Translate Server API
+  description: An API server for translating documents and text easily and quickly
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8080/api
+    description: Local dev server
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties: 
+        error:
+          type: string
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+
+  /deepl/translate:
+    post:
+      summary: Translate text or file
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: array
+                  items:
+                    type: string
+                source_lang:
+                  type: string
+                  description: ISO 639-1 language code (e.g., EN, DE, FR)
+                target_lang:
+                  type: string
+                  description: ISO 639-1 language code (e.g., EN, DE, FR)
+              required:
+                - text
+                - target_lang
+            example:
+              text: ["Hello", "World"]
+              source_lang: "EN"
+              target_lang: "DE"
+
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                source_lang:
+                  type: string
+                  description: ISO 639-1 language code (e.g., EN, DE, FR)
+                target_lang:
+                  type: string
+                  description: ISO 639-1 language code (e.g., EN, DE, FR)
+              required:
+                - file
+                - target_lang
+      responses:
+        '200':
+          description: Translated content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  translation:
+                    type: array
+                    items:
+                      type: string
+              example:
+                translation: ["Hallo", "Welt"]
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid JSON in the request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid or missing JWT token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/login:
+    post:
+      summary: Login
+      requestBody:
+        required: true 
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: 
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+              required: 
+                - email
+                - password
+      responses:
+        '200':
+          description: login successful. jwt token is returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: 
+                  id:
+                    type: string
+                    format: uuid
+                  email:
+                    type: string
+                    format: email
+                  token:
+                    type: string
+                    example: "eyJhbGciOiJIUzI1NiIs..."
+        '400':
+          description: Invalid JSON in the request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Incorrect email or password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /admin/users:
+    get:
+      summary: List users
+      security:
+      - BearerAuth: []
+      parameters: 
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                    created_at:
+                      type: string
+                      format: date-time
+                    updated_at:
+                      type: string
+                      format: date-time
+                    email:
+                      type: string
+                      format: email
+                    is_admin:
+                      type: boolean
+        '401':
+          description: Invalid or missing JWT token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: user is not admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'     
+    post:
+      summary: Create user
+      security:
+      - BearerAuth: []
+      requestBody: 
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: 
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+              required: 
+                - email
+                - password
+      responses:
+        '200':
+          description: User successfully created
+        '400':
+          description: Invalid JSON in the request body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid or missing JWT token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: user is not admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /admin/users/{id}:
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: User ID
+    get:
+      summary: Get user
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: user data
+          content:
+            application/json: 
+              schema:
+                type: object
+                properties: 
+                  id:
+                    type: string
+                    format: uuid
+                  created_at:
+                    type: string
+                    format: date-time
+                  updated_at:
+                    type: string
+                    format: date-time
+                  email:
+                    type: string
+                    format: email
+                  is_admin:
+                    type: boolean
+        '400':
+          description: Invalid ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid or missing JWT token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: user is not admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: user not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    put:
+      summary: Update user
+      security:
+      - BearerAuth: []
+      requestBody: 
+        required: true 
+        content:
+          application/json: 
+            schema:
+                type: object
+                properties:
+                  email:
+                    type: string
+                    format: email
+                  is_admin:
+                    type: boolean
+                  password:
+                    type: string
+                    format: password
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json: 
+              schema:
+                type: object
+                properties: 
+                  id:
+                    type: string
+                    format: uuid
+                  created_at:
+                    type: string
+                    format: date-time
+                  updated_at:
+                    type: string
+                    format: date-time
+                  email:
+                    type: string
+                    format: email
+                  is_admin:
+                    type: boolean
+        '400':
+          description: Invalid ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid or missing JWT token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: user is not admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: user not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      summary: Delete user
+      security:
+      - BearerAuth: []
+      responses:
+        '204':
+          description: User deleted
+        '400':
+          description: Invalid ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid or missing JWT token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: user is not admin
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: user not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'

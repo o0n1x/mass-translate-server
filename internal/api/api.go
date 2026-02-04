@@ -603,7 +603,7 @@ func (cfg *ApiConfig) MiddlewareIsAdmin(next func(w http.ResponseWriter, r *http
 		}
 		if !user.IsAdmin {
 			log.Printf("user %v attempted an admin action", user.ID)
-			errorRespond(w, 401, "Token missing or invalid")
+			errorRespond(w, 403, "Forbidden")
 			return
 		}
 		next(w, r)
