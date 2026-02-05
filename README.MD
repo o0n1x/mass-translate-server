@@ -1,6 +1,6 @@
 
 # Mass-Translate Server
-ths is an API server wrapper to the mass-translate package. this server features:
+this is an API server wrapper to the mass-translate package. this server features:
 - Authentication for API access
 - Admin access to DBMS through API
 - Redis DB Caching API responses to minimize API use
@@ -162,7 +162,7 @@ Authorization: Bearer <token>
 | PUT | `/api/admin/users/{id}` | Admin | Update user |
 
 
-## Enviroment Variables
+## Environment Variables
 
 
 |Env Variable | Description |
@@ -197,7 +197,7 @@ curl -X POST http://localhost:8080/api/deepl/translate \
 curl -X POST http://localhost:8080/api/deepl/translate \
   -H "Authorization: Bearer <token>" \
   -F "file=@example.txt" \
-  -F "target_lang": "FR"
+  -F "target_lang:FR"
 ```
 Set \<token\> to the token you got from login.
 
