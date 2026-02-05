@@ -162,13 +162,50 @@ Authorization: Bearer <token>
 | PUT | `/api/admin/users/{id}` | Admin | Update user |
 
 
-
-
-
-
 ## Enviroment Variables
 
 
-## Example Requests
+|Env Variable | Description |
+|--------|----------|
+| DB_URL | URL to the PostgreSQL DBMS |
+|REDIS_URL | URL to Redis |
+SECRET_JWT| a base64 32 digit long secret used to encrypt JWT tokens
+DEEPL_API| Deepl API used for translation by the server 
+ADMIN_EMAIL| default admin email for server access. Set to Nil to not setup admin account
+ADMIN_PASSWORD | default admin password for server access
+
+## Example API Requests
+
+### Login
+```bash
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin@example.com", "password": "password"}'
+```
+
+### Translate Text
+```bash
+curl -X POST http://localhost:8080/api/deepl/translate \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"text": ["Hello", "World"], "target_lang": "FR"}'
+```
+
+### Translate File
+
+```bash
+curl -X POST http://localhost:8080/api/deepl/translate \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@example.txt" \
+  -F "target_lang": "FR"
+```
+Set \<token\> to the token you got from login.
 
 ## Planned Features
+
+- **Metrics**: gather metrics with prometheus and display it using graphana
+
+- **Async document translation**: document translation become async due it taking a significant amount of time
+
+- **Custom error package**: standardize errors to ease error handling in the future
+
