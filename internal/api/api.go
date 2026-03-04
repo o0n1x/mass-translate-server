@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -18,11 +19,10 @@ import (
 	"github.com/o0n1x/Sublate/internal/auth"
 	"github.com/o0n1x/Sublate/internal/cache"
 	"github.com/o0n1x/Sublate/internal/database"
+	serr "github.com/o0n1x/sublate-go/errors"
 	"github.com/o0n1x/sublate-go/format"
 	"github.com/o0n1x/sublate-go/lang"
 	"github.com/o0n1x/sublate-go/provider"
-	"github.com/o0n1x/sublate-go/provider/deepl"
-	"github.com/o0n1x/sublate-go/translator"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -31,11 +31,12 @@ const MAXFILESIZE = 50 << 20
 const MAXQUERYSIZE = 100
 
 type ApiConfig struct {
-	DB               *database.Queries
-	Redis            *redis.Client
-	Platform         string
-	DeeplClient      *deepl.DeepLClient
-	DeeplClientAPI   string
+	DB       *database.Queries
+	Redis    *redis.Client
+	Platform string
+	Clients  map[provider.Provider]provider.Client
+	//DeeplClient      *deepl.DeepLClient
+	//DeeplClientAPI   string
 	AdminCredentials struct {
 		Email    string
 		Password string
@@ -342,19 +343,13 @@ func (cfg *ApiConfig) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
-func (cfg *ApiConfig) DeeplTranslate(w http.ResponseWriter, r *http.Request) {
-
-	if cfg.DeeplClient == nil {
-		generalizedclient, _ := provider.GetClient(provider.DeepL, cfg.DeeplClientAPI)
-		cfg.DeeplClient = generalizedclient.(*deepl.DeepLClient)
-	}
-
+func (cfg *ApiConfig) Translate(w http.ResponseWriter, r *http.Request) {
 	contentType := r.Header.Get("Content-Type")
 
 	if strings.HasPrefix(contentType, "multipart/form-data") {
-		cfg.fileTranslateHelper(w, r)
+		cfg.translateFile(w, r)
 	} else if contentType == "application/json" {
-		cfg.textTranslateHelper(w, r)
+		cfg.translateText(w, r)
 	} else {
 		http.Error(w, "unsupported content type", http.StatusBadRequest)
 	}
@@ -364,79 +359,8 @@ func (cfg *ApiConfig) DeeplTranslate(w http.ResponseWriter, r *http.Request) {
 //Helper Functions
 //
 
-func (cfg *ApiConfig) textTranslateHelper(w http.ResponseWriter, r *http.Request) {
-	type parameters struct {
-		Text       []string `json:"text"`
-		SourceLang string   `json:"source_lang"`
-		TargetLang string   `json:"target_lang"`
-	}
-	decoder := json.NewDecoder(r.Body)
-	params := parameters{}
-	err := decoder.Decode(&params)
-	if err != nil {
-		http.Error(w, "Invalid JSON in the request body", http.StatusBadRequest)
-		log.Printf("Error decoding parameters: %s", err)
-		return
-	}
-
-	req := provider.Request{
-		ReqType: format.Text,
-		Text:    params.Text,
-		From:    lang.Language(params.SourceLang),
-		To:      lang.Language(params.TargetLang),
-	}
-
-	cached, hit, err := cache.GetCache(r.Context(), cfg.Redis, provider.DeepL, req)
-	if err != nil {
-		log.Printf("cache error: %v", err)
-	}
-	if hit {
-		log.Print("Cache HIT")
-		w.Header().Set("X-Cache", "HIT")
-		textRespond(w, cached.Text)
-		return
-	}
-
-	res, err := cfg.DeeplClient.Translate(r.Context(), req)
-	if err != nil {
-		if strings.Contains(err.Error(), "Invalid Source Language") {
-			http.Error(w, "Error translating: Invalid Source Language", http.StatusBadRequest)
-		} else if strings.Contains(err.Error(), "Invalid Target Language") {
-			http.Error(w, "Error translating: Invalid Target Language", http.StatusBadRequest)
-		} else {
-			http.Error(w, "Error translating", http.StatusInternalServerError)
-		}
-
-		log.Printf("Error translating: %v", err)
-		return
-	}
-
-	err = cache.SetCache(r.Context(), cfg.Redis, provider.DeepL, req, res)
-	if err != nil {
-		log.Printf("cache set error: %v", err)
-	}
-
-	w.Header().Set("X-Cache", "MISS")
-	textRespond(w, res.Text)
-
-}
-func textRespond(w http.ResponseWriter, text []string) {
-	type TextResponse struct {
-		Translations []string `json:"translation"`
-	}
-	textres := TextResponse{Translations: text}
-	dat, err := json.Marshal(textres)
-	if err != nil {
-		http.Error(w, "Error marshalling JSON", http.StatusInternalServerError)
-		log.Printf("Error marshalling JSON: %s", err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(dat)
-}
-
 // TODO: limit how large the cache can be. atm even a 1GB file will be cached
-func (cfg *ApiConfig) fileTranslateHelper(w http.ResponseWriter, r *http.Request) {
+func (cfg *ApiConfig) translateFile(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, MAXFILESIZE)
 
 	file, header, err := r.FormFile("file")
@@ -445,11 +369,6 @@ func (cfg *ApiConfig) fileTranslateHelper(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer file.Close()
-
-	if !isFileAllowedDeepl(header.Filename) {
-		http.Error(w, "invalid file type", http.StatusBadRequest)
-		return
-	}
 
 	if r.FormValue("target_lang") == "" {
 		http.Error(w, "invalid form no target language", http.StatusBadRequest)
@@ -471,7 +390,14 @@ func (cfg *ApiConfig) fileTranslateHelper(w http.ResponseWriter, r *http.Request
 		To:       lang.Language(r.FormValue("target_lang")),
 	}
 
-	cached, hit, err := cache.GetCache(r.Context(), cfg.Redis, provider.DeepL, req)
+	providerName := r.FormValue("provider")
+	client, ok := cfg.Clients[provider.Provider(providerName)]
+	if !ok {
+		http.Error(w, "invalid provider", http.StatusBadRequest)
+		return
+	}
+
+	cached, hit, err := cache.GetCache(r.Context(), cfg.Redis, provider.Provider(providerName), req)
 	if err != nil {
 		log.Printf("cache error: %v", err)
 	}
@@ -482,27 +408,155 @@ func (cfg *ApiConfig) fileTranslateHelper(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	res, err := translator.Translate(r.Context(), req, cfg.DeeplClient)
-	if err != nil {
-		if strings.Contains(err.Error(), "Invalid Source Language") {
-			http.Error(w, "Error translating: Invalid Source Language", http.StatusBadRequest)
-		} else if strings.Contains(err.Error(), "Invalid Target Language") {
-			http.Error(w, "Error translating: Invalid Target Language", http.StatusBadRequest)
+	ac, ok := client.(provider.AsyncClient)
+	if ok {
+		res, err := ac.AsyncTranslate(r.Context(), req)
+		if err != nil {
+			log.Printf("Error translating: %v", err)
+			var tErr *serr.TranslateError
+			if errors.As(err, &tErr) {
+
+				switch tErr.Code {
+				case serr.ErrInvalidLanguage:
+					http.Error(w, "Invalid Language", http.StatusBadRequest)
+					return
+				case serr.ErrInvalidRequest:
+					break // if invalidRequest is returned then fallback to syncclient translation
+				case serr.ErrProviderAPI:
+					http.Error(w, "Provider Error", http.StatusBadGateway)
+					return
+				default:
+					http.Error(w, "Error translating", http.StatusInternalServerError)
+					return
+				}
+			}
 		} else {
+			//TODO respond instead with a jobID
+			jsonRespond(w, 202, res)
+			return
+		}
+	}
+
+	sc, ok := client.(provider.SyncClient)
+	if ok {
+		res, err := sc.Translate(r.Context(), req)
+		if err != nil {
+			log.Printf("Error translating: %v", err)
+			var tErr *serr.TranslateError
+			if errors.As(err, &tErr) {
+				switch tErr.Code {
+				case serr.ErrInvalidLanguage:
+					http.Error(w, "Invalid Language", http.StatusBadRequest)
+				case serr.ErrInvalidRequest:
+					http.Error(w, "Invalid Request", http.StatusBadRequest)
+				case serr.ErrProviderAPI:
+					http.Error(w, "Provider Error", http.StatusBadGateway)
+				default:
+					http.Error(w, "Error translating", http.StatusInternalServerError)
+				}
+				return
+			}
+		}
+
+		err = cache.SetCache(r.Context(), cfg.Redis, provider.Provider(providerName), req, res)
+		if err != nil {
+			log.Printf("cache set error: %v", err)
+		}
+
+		w.Header().Set("X-Cache", "MISS")
+		fileRespond(w, res.Binary, req.FileName)
+	}
+
+}
+
+func (cfg *ApiConfig) translateText(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Provider   string   `json:"provider"`
+		Text       []string `json:"text"`
+		SourceLang string   `json:"source_lang"`
+		TargetLang string   `json:"target_lang"`
+	}
+	decoder := json.NewDecoder(r.Body)
+	params := parameters{}
+	err := decoder.Decode(&params)
+	if err != nil {
+		http.Error(w, "Invalid JSON in the request body", http.StatusBadRequest)
+		log.Printf("Error decoding parameters: %s", err)
+		return
+	}
+
+	req := provider.Request{
+		ReqType: format.Text,
+		Text:    params.Text,
+		From:    lang.Language(params.SourceLang),
+		To:      lang.Language(params.TargetLang),
+	}
+
+	providerName := params.Provider
+	client, ok := cfg.Clients[provider.Provider(providerName)]
+	if !ok {
+		http.Error(w, "invalid provider", http.StatusBadRequest)
+		return
+	}
+
+	cached, hit, err := cache.GetCache(r.Context(), cfg.Redis, provider.Provider(providerName), req)
+	if err != nil {
+		log.Printf("cache error: %v", err)
+	}
+	if hit {
+		log.Print("Cache HIT")
+		w.Header().Set("X-Cache", "HIT")
+		textRespond(w, cached.Text)
+		return
+	}
+
+	//Assumption that all provider is Sync with text translation
+	sc, ok := client.(provider.SyncClient)
+	if !ok {
+		http.Error(w, "invalid provider", http.StatusBadRequest)
+		return
+	}
+
+	res, err := sc.Translate(r.Context(), req)
+	var tErr *serr.TranslateError
+	if errors.As(err, &tErr) {
+		switch tErr.Code {
+		case serr.ErrInvalidLanguage:
+			http.Error(w, "Invalid Language", http.StatusBadRequest)
+		case serr.ErrInvalidRequest:
+			http.Error(w, "Invalid Request", http.StatusBadRequest)
+		case serr.ErrProviderAPI:
+			http.Error(w, "Provider Error", http.StatusBadGateway)
+		default:
 			http.Error(w, "Error translating", http.StatusInternalServerError)
 		}
 		log.Printf("Error translating: %v", err)
 		return
 	}
 
-	err = cache.SetCache(r.Context(), cfg.Redis, provider.DeepL, req, res)
+	err = cache.SetCache(r.Context(), cfg.Redis, provider.Provider(providerName), req, res)
 	if err != nil {
 		log.Printf("cache set error: %v", err)
 	}
 
 	w.Header().Set("X-Cache", "MISS")
-	fileRespond(w, res.Binary, req.FileName)
+	textRespond(w, res.Text)
 
+}
+
+func textRespond(w http.ResponseWriter, text []string) {
+	type TextResponse struct {
+		Translations []string `json:"translation"`
+	}
+	textres := TextResponse{Translations: text}
+	dat, err := json.Marshal(textres)
+	if err != nil {
+		http.Error(w, "Error marshalling JSON", http.StatusInternalServerError)
+		log.Printf("Error marshalling JSON: %s", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(dat)
 }
 
 func fileRespond(w http.ResponseWriter, binary []byte, filename string) {

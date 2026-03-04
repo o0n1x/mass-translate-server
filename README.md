@@ -10,7 +10,7 @@ This is an API server wrapper to the [sublate-go](https://github.com/o0n1x/subla
 
 ## Motivation
 
-I've always wanted a server or an app that I can use to translate anything from anywhere. for example, when my family needs a translation for subtitles of a movie they want to watch it.I often cant find an easy solution for it. So, I made a generalized translation server that had an API that I can use to translate anything quickly and very easily!
+I've always wanted a server or an app that I can use to translate anything from anywhere. for example, when my family needs a translation for subtitles of a movie they want to watch it.I often cant find an easy solution for it. So, I made Sublate, a generalized translation server that has an API that I can use to translate anything quickly and very easily!
 
 
 ## Quick Start using Docker

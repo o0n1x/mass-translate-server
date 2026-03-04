@@ -11,6 +11,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/o0n1x/Sublate/internal/api"
 	"github.com/o0n1x/Sublate/internal/database"
+	"github.com/o0n1x/sublate-go/provider"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -38,7 +39,10 @@ func main() {
 	dbms := database.New(db)
 	cfg := api.ApiConfig{}
 	cfg.DB = dbms
-	cfg.DeeplClientAPI = deeplAPI
+	cfg.Clients[provider.DeepL], err = provider.GetClient(provider.DeepL, deeplAPI)
+	if err != nil {
+		log.Fatalf("Failed to initalize Deepl Provider: %v", err)
+	}
 	cfg.Redis = rdb
 	cfg.AdminCredentials.Email = os.Getenv("ADMIN_EMAIL")
 	cfg.AdminCredentials.Password = os.Getenv("ADMIN_PASSWORD")
@@ -51,7 +55,7 @@ func main() {
 	mux.Handle(filepathRoot, http.StripPrefix("/app/", http.FileServer(http.Dir("."))))
 
 	mux.HandleFunc("GET /api/health", api.HealthCheck)
-	mux.HandleFunc("POST /api/deepl/translate", cfg.MiddlewareIsUser(cfg.DeeplTranslate))
+	mux.HandleFunc("POST /api/deepl/translate", cfg.MiddlewareIsUser(cfg.Translate))
 	mux.HandleFunc("POST /api/auth/login", cfg.Login)
 	mux.HandleFunc("POST /api/admin/users", cfg.MiddlewareIsAdmin(cfg.Register))
 	mux.HandleFunc("GET /api/admin/users", cfg.MiddlewareIsAdmin(cfg.GetUsers))
