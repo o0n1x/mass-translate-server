@@ -11,6 +11,17 @@ import (
 	"github.com/google/uuid"
 )
 
+type Document struct {
+	ID          uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	ExternalID  string
+	ExternalKey sql.NullString
+	Filename    sql.NullString
+	Status      string
+	RequestID   uuid.UUID
+}
+
 type Log struct {
 	ID           uuid.UUID
 	CreatedAt    time.Time

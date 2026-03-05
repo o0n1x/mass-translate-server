@@ -30,6 +30,8 @@ import (
 const MAXFILESIZE = 50 << 20
 const MAXQUERYSIZE = 100
 
+const USERCONTEXTKEY = "user"
+
 type ApiConfig struct {
 	DB       *database.Queries
 	Redis    *redis.Client
@@ -355,6 +357,12 @@ func (cfg *ApiConfig) Translate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (cfg *ApiConfig) Status(w http.ResponseWriter, r *http.Request) {}
+
+func (cfg *ApiConfig) Result(w http.ResponseWriter, r *http.Request) {}
+
+func (cfg *ApiConfig) Metrics(w http.ResponseWriter, r *http.Request) {}
+
 //
 //Helper Functions
 //
@@ -362,6 +370,13 @@ func (cfg *ApiConfig) Translate(w http.ResponseWriter, r *http.Request) {
 // TODO: limit how large the cache can be. atm even a 1GB file will be cached
 func (cfg *ApiConfig) translateFile(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, MAXFILESIZE)
+
+	providerName := r.FormValue("provider")
+	client, ok := cfg.Clients[provider.Provider(providerName)]
+	if !ok {
+		http.Error(w, "invalid provider", http.StatusBadRequest)
+		return
+	}
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -372,6 +387,19 @@ func (cfg *ApiConfig) translateFile(w http.ResponseWriter, r *http.Request) {
 
 	if r.FormValue("target_lang") == "" {
 		http.Error(w, "invalid form no target language", http.StatusBadRequest)
+		return
+	}
+
+	reqDB, err := cfg.DB.CreateRequest(r.Context(), database.CreateRequestParams{
+		Provider: providerName,
+		ReqType:  format.File.String(),
+		FromLang: r.FormValue("source_lang"),
+		ToLang:   r.FormValue("target_lang"),
+		UserID:   r.Context().Value(USERCONTEXTKEY).(database.User).ID,
+	})
+	if err != nil {
+		log.Printf("Error creating request: %v", err)
+		errorRespond(w, 500, "request creation failed")
 		return
 	}
 
@@ -390,18 +418,17 @@ func (cfg *ApiConfig) translateFile(w http.ResponseWriter, r *http.Request) {
 		To:       lang.Language(r.FormValue("target_lang")),
 	}
 
-	providerName := r.FormValue("provider")
-	client, ok := cfg.Clients[provider.Provider(providerName)]
-	if !ok {
-		http.Error(w, "invalid provider", http.StatusBadRequest)
-		return
-	}
-
+	//TODO: caching not connected to DB yet
 	cached, hit, err := cache.GetCache(r.Context(), cfg.Redis, provider.Provider(providerName), req)
 	if err != nil {
 		log.Printf("cache error: %v", err)
 	}
 	if hit {
+		_, err := cfg.DB.CreateLog(r.Context(), database.CreateLogParams{IsSuccessful: true, Cached: true, Error: sql.NullString{String: "", Valid: false}, RequestID: reqDB.ID})
+		if err != nil { //no need to return as logging errors should not affect users
+			log.Printf("Error creating Log: %v", err)
+		}
+
 		log.Print("Cache HIT")
 		w.Header().Set("X-Cache", "HIT")
 		fileRespond(w, cached.Binary, req.FileName)
@@ -412,6 +439,11 @@ func (cfg *ApiConfig) translateFile(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		res, err := ac.AsyncTranslate(r.Context(), req)
 		if err != nil {
+			_, err := cfg.DB.CreateLog(r.Context(), database.CreateLogParams{IsSuccessful: false, Cached: false, Error: sql.NullString{String: err.Error(), Valid: true}, RequestID: reqDB.ID})
+			if err != nil { //no need to return as logging errors should not affect users
+				log.Printf("Error creating Log: %v", err)
+			}
+
 			log.Printf("Error translating: %v", err)
 			var tErr *serr.TranslateError
 			if errors.As(err, &tErr) {
@@ -431,8 +463,36 @@ func (cfg *ApiConfig) translateFile(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		} else {
+			_, err := cfg.DB.CreateLog(r.Context(), database.CreateLogParams{IsSuccessful: true, Cached: false, Error: sql.NullString{String: "", Valid: false}, RequestID: reqDB.ID})
+			if err != nil { //no need to return as logging errors should not affect users
+				log.Printf("Error creating Log: %v", err)
+			}
 			//TODO respond instead with a jobID
-			jsonRespond(w, 202, res)
+			var exKey sql.NullString
+			if res.DocumentKey == "" {
+				exKey = sql.NullString{String: res.DocumentKey, Valid: false}
+			} else {
+				exKey = sql.NullString{String: res.DocumentKey, Valid: true}
+			}
+
+			doc, err := cfg.DB.CreateDocument(r.Context(), database.CreateDocumentParams{
+				ExternalID:  res.DocumentID,
+				ExternalKey: exKey,
+				Filename:    sql.NullString{String: req.FileName, Valid: true},
+				Status:      "Pending",
+				RequestID:   reqDB.ID,
+			})
+			if err != nil {
+				log.Printf("Error creating document: %v", err)
+				http.Error(w, "Error creating document", http.StatusInternalServerError)
+				return
+			}
+			result := struct {
+				DocumentID uuid.UUID `json:"document_id"`
+			}{
+				DocumentID: doc.ID,
+			}
+			jsonRespond(w, 202, result)
 			return
 		}
 	}
@@ -441,6 +501,10 @@ func (cfg *ApiConfig) translateFile(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		res, err := sc.Translate(r.Context(), req)
 		if err != nil {
+			_, err := cfg.DB.CreateLog(r.Context(), database.CreateLogParams{IsSuccessful: false, Cached: false, Error: sql.NullString{String: err.Error(), Valid: true}, RequestID: reqDB.ID})
+			if err != nil { //no need to return as logging errors should not affect users
+				log.Printf("Error creating Log: %v", err)
+			}
 			log.Printf("Error translating: %v", err)
 			var tErr *serr.TranslateError
 			if errors.As(err, &tErr) {
@@ -456,6 +520,14 @@ func (cfg *ApiConfig) translateFile(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
+			http.Error(w, "Error translating", http.StatusInternalServerError) // fallback incase somehow err is not serr error
+			log.Printf("Error translating: %v", err)
+			return
+		}
+
+		_, err = cfg.DB.CreateLog(r.Context(), database.CreateLogParams{IsSuccessful: true, Cached: false, Error: sql.NullString{String: "", Valid: false}, RequestID: reqDB.ID})
+		if err != nil { //no need to return as logging errors should not affect users
+			log.Printf("Error creating Log: %v", err)
 		}
 
 		err = cache.SetCache(r.Context(), cfg.Redis, provider.Provider(providerName), req, res)
@@ -485,13 +557,6 @@ func (cfg *ApiConfig) translateText(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req := provider.Request{
-		ReqType: format.Text,
-		Text:    params.Text,
-		From:    lang.Language(params.SourceLang),
-		To:      lang.Language(params.TargetLang),
-	}
-
 	providerName := params.Provider
 	client, ok := cfg.Clients[provider.Provider(providerName)]
 	if !ok {
@@ -499,11 +564,35 @@ func (cfg *ApiConfig) translateText(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	reqDB, err := cfg.DB.CreateRequest(r.Context(), database.CreateRequestParams{
+		Provider: providerName,
+		ReqType:  format.Text.String(),
+		FromLang: params.SourceLang,
+		ToLang:   params.TargetLang,
+		UserID:   r.Context().Value(USERCONTEXTKEY).(database.User).ID,
+	})
+	if err != nil {
+		log.Printf("Error creating request: %v", err)
+		errorRespond(w, 500, "request creation failed")
+		return
+	}
+
+	req := provider.Request{
+		ReqType: format.Text,
+		Text:    params.Text,
+		From:    lang.Language(params.SourceLang),
+		To:      lang.Language(params.TargetLang),
+	}
+
 	cached, hit, err := cache.GetCache(r.Context(), cfg.Redis, provider.Provider(providerName), req)
 	if err != nil {
 		log.Printf("cache error: %v", err)
 	}
 	if hit {
+		_, err := cfg.DB.CreateLog(r.Context(), database.CreateLogParams{IsSuccessful: true, Cached: true, Error: sql.NullString{String: "", Valid: false}, RequestID: reqDB.ID})
+		if err != nil { //no need to return as logging errors should not affect users
+			log.Printf("Error creating Log: %v", err)
+		}
 		log.Print("Cache HIT")
 		w.Header().Set("X-Cache", "HIT")
 		textRespond(w, cached.Text)
@@ -518,18 +607,27 @@ func (cfg *ApiConfig) translateText(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := sc.Translate(r.Context(), req)
-	var tErr *serr.TranslateError
-	if errors.As(err, &tErr) {
-		switch tErr.Code {
-		case serr.ErrInvalidLanguage:
-			http.Error(w, "Invalid Language", http.StatusBadRequest)
-		case serr.ErrInvalidRequest:
-			http.Error(w, "Invalid Request", http.StatusBadRequest)
-		case serr.ErrProviderAPI:
-			http.Error(w, "Provider Error", http.StatusBadGateway)
-		default:
-			http.Error(w, "Error translating", http.StatusInternalServerError)
+	if err != nil {
+		_, err := cfg.DB.CreateLog(r.Context(), database.CreateLogParams{IsSuccessful: false, Cached: false, Error: sql.NullString{String: err.Error(), Valid: true}, RequestID: reqDB.ID})
+		if err != nil { //no need to return as logging errors should not affect users
+			log.Printf("Error creating Log: %v", err)
 		}
+		var tErr *serr.TranslateError
+		if errors.As(err, &tErr) {
+			switch tErr.Code {
+			case serr.ErrInvalidLanguage:
+				http.Error(w, "Invalid Language", http.StatusBadRequest)
+			case serr.ErrInvalidRequest:
+				http.Error(w, "Invalid Request", http.StatusBadRequest)
+			case serr.ErrProviderAPI:
+				http.Error(w, "Provider Error", http.StatusBadGateway)
+			default:
+				http.Error(w, "Error translating", http.StatusInternalServerError)
+			}
+			log.Printf("Error translating: %v", err)
+			return
+		}
+		http.Error(w, "Error translating", http.StatusInternalServerError) // fallback incase somehow err is not serr error
 		log.Printf("Error translating: %v", err)
 		return
 	}
@@ -539,6 +637,10 @@ func (cfg *ApiConfig) translateText(w http.ResponseWriter, r *http.Request) {
 		log.Printf("cache set error: %v", err)
 	}
 
+	_, err = cfg.DB.CreateLog(r.Context(), database.CreateLogParams{IsSuccessful: true, Cached: false, Error: sql.NullString{String: "", Valid: false}, RequestID: reqDB.ID})
+	if err != nil { //no need to return as logging errors should not affect users
+		log.Printf("Error creating Log: %v", err)
+	}
 	w.Header().Set("X-Cache", "MISS")
 	textRespond(w, res.Text)
 
@@ -631,7 +733,7 @@ func (cfg *ApiConfig) MiddlewareIsUser(next func(w http.ResponseWriter, r *http.
 			errorRespond(w, 401, "Token missing or invalid, Please Login First")
 			return
 		}
-		ctx := context.WithValue(r.Context(), "user", user)
+		ctx := context.WithValue(r.Context(), USERCONTEXTKEY, user)
 		next(w, r.WithContext(ctx))
 	}
 }

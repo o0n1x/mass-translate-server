@@ -12,6 +12,7 @@ import (
 	"github.com/o0n1x/Sublate/internal/api"
 	"github.com/o0n1x/Sublate/internal/database"
 	"github.com/o0n1x/sublate-go/provider"
+	_ "github.com/o0n1x/sublate-go/provider/deepl"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -19,7 +20,7 @@ func main() {
 
 	godotenv.Load()
 	dbURL := os.Getenv("DB_URL")
-	//secret := os.Getenv("SECRET_JWT")
+	secret := os.Getenv("SECRET_JWT")
 	deeplAPI := os.Getenv("DEEPL_API")
 	filepathRoot := "/app/"
 	port := "8080"
@@ -39,6 +40,8 @@ func main() {
 	dbms := database.New(db)
 	cfg := api.ApiConfig{}
 	cfg.DB = dbms
+	cfg.SECRET_JWT = secret
+	cfg.Clients = make(map[provider.Provider]provider.Client)
 	cfg.Clients[provider.DeepL], err = provider.GetClient(provider.DeepL, deeplAPI)
 	if err != nil {
 		log.Fatalf("Failed to initalize Deepl Provider: %v", err)
@@ -55,7 +58,7 @@ func main() {
 	mux.Handle(filepathRoot, http.StripPrefix("/app/", http.FileServer(http.Dir("."))))
 
 	mux.HandleFunc("GET /api/health", api.HealthCheck)
-	mux.HandleFunc("POST /api/deepl/translate", cfg.MiddlewareIsUser(cfg.Translate))
+	mux.HandleFunc("POST /api/deepl/translate", cfg.MiddlewareIsUser(cfg.Translate)) //TODO: provider choice is made in the request not in api path anymore
 	mux.HandleFunc("POST /api/auth/login", cfg.Login)
 	mux.HandleFunc("POST /api/admin/users", cfg.MiddlewareIsAdmin(cfg.Register))
 	mux.HandleFunc("GET /api/admin/users", cfg.MiddlewareIsAdmin(cfg.GetUsers))
