@@ -58,7 +58,12 @@ func main() {
 	mux.Handle(filepathRoot, http.StripPrefix("/app/", http.FileServer(http.Dir("."))))
 
 	mux.HandleFunc("GET /api/health", api.HealthCheck)
-	mux.HandleFunc("POST /api/deepl/translate", cfg.MiddlewareIsUser(cfg.Translate)) //TODO: provider choice is made in the request not in api path anymore
+
+	mux.HandleFunc("POST /api/translate", cfg.MiddlewareIsUser(cfg.Translate)) //TODO: provider choice is made in the request not in api path anymore
+	mux.HandleFunc("GET /api/documents/{id}", cfg.MiddlewareIsUser(cfg.Status))
+	mux.HandleFunc("DELETE /api/documents/{id}", cfg.MiddlewareIsUser(cfg.DeleteDocument))
+	mux.HandleFunc("GET /api/documents/{id}/download", cfg.MiddlewareIsUser(cfg.Result))
+
 	mux.HandleFunc("POST /api/auth/login", cfg.Login)
 	mux.HandleFunc("POST /api/admin/users", cfg.MiddlewareIsAdmin(cfg.Register))
 	mux.HandleFunc("GET /api/admin/users", cfg.MiddlewareIsAdmin(cfg.GetUsers))

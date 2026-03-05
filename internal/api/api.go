@@ -357,10 +357,110 @@ func (cfg *ApiConfig) Translate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (cfg *ApiConfig) Status(w http.ResponseWriter, r *http.Request) {}
+type Status struct {
+	Done    bool   `json:"done"`
+	Failed  bool   `json:"failed"`
+	Message string `json:"message"`
+	Seconds int    `json:"seconds"`
+}
 
-func (cfg *ApiConfig) Result(w http.ResponseWriter, r *http.Request) {}
+func (cfg *ApiConfig) Status(w http.ResponseWriter, r *http.Request) {
+	user := r.Context().Value(USERCONTEXTKEY).(database.User).ID
+	docID := r.PathValue("id")
+	docUUID, err := uuid.Parse(docID)
+	if err != nil {
+		log.Printf("Error invalid user ID: %v", err)
+		http.Error(w, "incorrect id", http.StatusBadRequest)
+		return
+	}
 
+	doc_userid, err := cfg.DB.GetDocumentUser(r.Context(), docUUID)
+	if err != nil {
+		log.Printf("Error getting userid from documentid: %v", err)
+		http.Error(w, "invalid document id", http.StatusBadRequest)
+		return
+	}
+	if doc_userid != user {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	//get provider from request
+	row, err := cfg.DB.GetDocumentProvider(r.Context(), docUUID)
+	providerName := row.Provider
+	client, ok := cfg.Clients[provider.Provider(providerName)]
+	if !ok {
+		http.Error(w, "invalid provider", http.StatusBadRequest)
+		return
+	}
+	ac, ok := client.(provider.AsyncClient)
+	if !ok {
+		log.Printf("error getting Async proivder when checking status: %v", err)
+		http.Error(w, "Provider not available", http.StatusInternalServerError)
+		return
+	}
+
+	//getting document
+	document, err := cfg.DB.GetDocument(r.Context(), docUUID)
+	if err != nil {
+		log.Printf("Error getting document %v: %v", docUUID, err)
+		http.Error(w, "invalid document id", http.StatusBadRequest)
+		return
+	}
+
+	status, err := ac.CheckStatus(r.Context(), provider.AsyncResponse{DocumentID: document.ExternalID, DocumentKey: document.ExternalKey.String})
+	if err != nil {
+		log.Printf("Error checking status for document %v: %v", docUUID, err)
+		http.Error(w, "error checking status", http.StatusInternalServerError)
+		return
+	}
+
+	if status.Done {
+		_, err := cfg.DB.UpdateDocument(r.Context(), database.UpdateDocumentParams{ID: docUUID, Status: "done"})
+		if err != nil {
+			log.Printf("Error updating document %v: %v", docUUID, err)
+			http.Error(w, "error updating status", http.StatusBadRequest)
+			return
+		}
+		jsonRespond(w, 200, Status{
+			Done:   true,
+			Failed: false,
+		})
+	} else if status.Failed {
+		_, err := cfg.DB.UpdateDocument(r.Context(), database.UpdateDocumentParams{ID: docUUID, Status: "failed"})
+		if err != nil {
+			log.Printf("Error updating document %v: %v", docUUID, err)
+			http.Error(w, "error updating status", http.StatusBadRequest)
+			return
+		}
+		jsonRespond(w, 200, Status{
+			Done:    false,
+			Failed:  true,
+			Message: status.Message,
+		})
+	} else {
+		jsonRespond(w, 200, Status{
+			Done:    false,
+			Failed:  false,
+			Seconds: status.SecondsRemaining,
+		})
+
+	}
+
+}
+
+func (cfg *ApiConfig) DeleteDocument(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func (cfg *ApiConfig) Result(w http.ResponseWriter, r *http.Request) {
+
+}
+
+// log api to query logs table
+func (cfg *ApiConfig) Logs(w http.ResponseWriter, r *http.Request) {}
+
+// metrics api endpoint for promethius in the future
 func (cfg *ApiConfig) Metrics(w http.ResponseWriter, r *http.Request) {}
 
 //
@@ -479,7 +579,7 @@ func (cfg *ApiConfig) translateFile(w http.ResponseWriter, r *http.Request) {
 				ExternalID:  res.DocumentID,
 				ExternalKey: exKey,
 				Filename:    sql.NullString{String: req.FileName, Valid: true},
-				Status:      "Pending",
+				Status:      "pending",
 				RequestID:   reqDB.ID,
 			})
 			if err != nil {
