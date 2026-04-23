@@ -23,7 +23,7 @@ func main() {
 	secret := os.Getenv("SECRET_JWT")
 	deeplAPI := os.Getenv("DEEPL_API")
 	filepathRoot := "/app/"
-	port := "8080"
+	port := "8080" //TODO port and other stuff like JWT expiry needs to be configurable in the env
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatalf("Error connecting to PostgreSQL DB: %v", err)
@@ -59,7 +59,7 @@ func main() {
 
 	mux.HandleFunc("GET /api/health", api.HealthCheck)
 
-	mux.HandleFunc("POST /api/translate", cfg.MiddlewareIsUser(cfg.Translate)) //TODO: provider choice is made in the request not in api path anymore
+	mux.HandleFunc("POST /api/translate", cfg.MiddlewareIsUser(cfg.Translate)) //TODO: provider choice is made in the request not in api path anymore: DONE
 	mux.HandleFunc("GET /api/documents/{id}", cfg.MiddlewareIsUser(cfg.Status))
 	mux.HandleFunc("DELETE /api/documents/{id}", cfg.MiddlewareIsUser(cfg.DeleteDocument))
 	mux.HandleFunc("GET /api/documents/{id}/download", cfg.MiddlewareIsUser(cfg.Result))

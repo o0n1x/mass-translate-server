@@ -2,9 +2,9 @@ GET http://localhost:8080/api/health HTTP/1.1
 
 ###
 
-POST http://localhost:8080/api/deepl/translate HTTP/1.1
+POST http://localhost:8080/api/translate HTTP/1.1
 Content-Type: application/json
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHkiLCJzdWIiOiIyMzk5N2I1ZS1lY2ZkLTQzNjctOTdjMS1hOWY4ZWJjZTQxZDciLCJleHAiOjE3NzI3MjgwMzksImlhdCI6MTc3MjcyNDQzOX0.3lkzHTXSyJAATMHF2WRabjiUjEMPaHFoZER6dUzndNo
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHkiLCJzdWIiOiJiYTA5MzlkMC1iNGEzLTRjMjYtYTQxOC00Yzg5ODhmZWMzNTYiLCJleHAiOjE3NzY4ODAwMTksImlhdCI6MTc3Njg3NjQxOX0.JZ0NPRkafA2MgDdymB-MHDAW_AcDGCXOPvHw-ORqPus
 
 {
     "provider": "DeepL",
@@ -17,13 +17,13 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHkiL
 
 POST http://localhost:8080/api/translate HTTP/1.1
 Content-Type: multipart/form-data; boundary=----WebKitFormBoundary
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHkiLCJzdWIiOiIyMzk5N2I1ZS1lY2ZkLTQzNjctOTdjMS1hOWY4ZWJjZTQxZDciLCJleHAiOjE3NzI3NTEzMTcsImlhdCI6MTc3Mjc0NzcxN30.4VHTVc_BpLzKKZcnuN3bGoqv9jWp6wi2kHxgKpV1d9A
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHkiLCJzdWIiOiJiYTA5MzlkMC1iNGEzLTRjMjYtYTQxOC00Yzg5ODhmZWMzNTYiLCJleHAiOjE3NzY5NjY5MjcsImlhdCI6MTc3Njk2MzMyN30.E5MzPU0OTgXic2TOiYDnsTWFx_GBqFdpmB2kXKoZtZY
 
 ------WebKitFormBoundary
 Content-Disposition: form-data; name="file"; filename="test.txt"
 Content-Type: text/plain
 
-Hello world this is a test fil.
+Hello world this is a test file.
 ------WebKitFormBoundary
 Content-Disposition: form-data; name="source_lang"
 
@@ -41,9 +41,9 @@ JA
 
 ###
 
-GET http://localhost:8080/api/documents/64bf6edc-53c0-4574-bd97-f4b6a7760189
+GET http://localhost:8080/api/documents/c06b491c-562a-4d57-b765-e979d4e32536/download
 Content-Type: application/json
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHkiLCJzdWIiOiJjNDcyOTRmMS1jOWRmLTRiMmMtOWYxMi1lYzg4OTk4MThmOGMiLCJleHAiOjE3NzI3NTE1NzEsImlhdCI6MTc3Mjc0Nzk3MX0.qn4UDvzyvOj8S2Yh7wO5VC8NZD2M4PC9stHFvhJO2QM
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHkiLCJzdWIiOiJiYTA5MzlkMC1iNGEzLTRjMjYtYTQxOC00Yzg5ODhmZWMzNTYiLCJleHAiOjE3NzY5NjY5MjcsImlhdCI6MTc3Njk2MzMyN30.E5MzPU0OTgXic2TOiYDnsTWFx_GBqFdpmB2kXKoZtZY
 
 ###
 

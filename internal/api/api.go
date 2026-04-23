@@ -390,13 +390,13 @@ func (cfg *ApiConfig) Status(w http.ResponseWriter, r *http.Request) {
 	providerName := row.Provider
 	client, ok := cfg.Clients[provider.Provider(providerName)]
 	if !ok {
-		http.Error(w, "invalid provider", http.StatusBadRequest)
+		http.Error(w, "Provider no longer available", http.StatusInternalServerError) //we cant blame user for provider not being avaialbe at this point, returning 500 is better
 		return
 	}
 	ac, ok := client.(provider.AsyncClient)
 	if !ok {
-		log.Printf("error getting Async proivder when checking status: %v", err)
-		http.Error(w, "Provider not available", http.StatusInternalServerError)
+		log.Printf("error getting %v Async provider when checking status: %v", providerName, err)
+		http.Error(w, "Provider no longer available", http.StatusInternalServerError)
 		return
 	}
 
@@ -450,18 +450,80 @@ func (cfg *ApiConfig) Status(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *ApiConfig) DeleteDocument(w http.ResponseWriter, r *http.Request) {
-
+	//validate user
+	//delete document
+	// respond
 }
 
 func (cfg *ApiConfig) Result(w http.ResponseWriter, r *http.Request) {
+	user := r.Context().Value(USERCONTEXTKEY).(database.User).ID
+	docID := r.PathValue("id")
+	docUUID, err := uuid.Parse(docID)
+	if err != nil {
+		log.Printf("Error invalid user ID: %v", err)
+		http.Error(w, "incorrect id", http.StatusBadRequest)
+		return
+	}
+
+	doc_userid, err := cfg.DB.GetDocumentUser(r.Context(), docUUID)
+	if err != nil {
+		log.Printf("Error getting userid from documentid: %v", err)
+		http.Error(w, "invalid document id", http.StatusBadRequest)
+		return
+	}
+	if doc_userid != user {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	//get provider from request
+	row, err := cfg.DB.GetDocumentProvider(r.Context(), docUUID)
+	providerName := row.Provider
+	client, ok := cfg.Clients[provider.Provider(providerName)]
+	if !ok {
+		http.Error(w, "Provider no longer available", http.StatusInternalServerError) //we cant blame user for provider not being avaialbe at this point, returning 500 is better
+		return
+	}
+	ac, ok := client.(provider.AsyncClient)
+	if !ok {
+		log.Printf("error getting %v Async provider when checking status: %v", providerName, err)
+		http.Error(w, "Provider no longer available", http.StatusInternalServerError)
+		return
+	}
+
+	document, err := cfg.DB.GetDocument(r.Context(), docUUID)
+	if err != nil {
+		log.Printf("Error getting document %v: %v", docUUID, err)
+		http.Error(w, "invalid document id", http.StatusBadRequest)
+		return
+	}
+
+	if document.Status != "done" && document.Status != "error" {
+		http.Error(w, "document not ready yet", http.StatusBadRequest)
+		return
+	}
+
+	result, err := ac.GetResult(r.Context(), provider.AsyncResponse{DocumentID: document.ExternalID, DocumentKey: document.ExternalKey.String})
+	if err != nil {
+		log.Printf("Error getting result for document %v: %v", docUUID, err)
+		http.Error(w, "error getting result for document", http.StatusInternalServerError)
+		return
+	}
+
+	fileRespond(w, result.Binary, document.Filename.String)
 
 }
 
 // log api to query logs table
-func (cfg *ApiConfig) Logs(w http.ResponseWriter, r *http.Request) {}
+func (cfg *ApiConfig) Logs(w http.ResponseWriter, r *http.Request) {
+	//jst like users api endpoint
+}
 
 // metrics api endpoint for promethius in the future
-func (cfg *ApiConfig) Metrics(w http.ResponseWriter, r *http.Request) {}
+func (cfg *ApiConfig) Metrics(w http.ResponseWriter, r *http.Request) {
+	//needs a singleton that records metrics and a function that does the counting
+
+}
 
 //
 //Helper Functions
