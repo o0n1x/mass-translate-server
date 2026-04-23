@@ -17,7 +17,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHkiL
 
 POST http://localhost:8080/api/translate HTTP/1.1
 Content-Type: multipart/form-data; boundary=----WebKitFormBoundary
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHkiLCJzdWIiOiJiYTA5MzlkMC1iNGEzLTRjMjYtYTQxOC00Yzg5ODhmZWMzNTYiLCJleHAiOjE3NzY5NjY5MjcsImlhdCI6MTc3Njk2MzMyN30.E5MzPU0OTgXic2TOiYDnsTWFx_GBqFdpmB2kXKoZtZY
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHkiLCJzdWIiOiJiYTA5MzlkMC1iNGEzLTRjMjYtYTQxOC00Yzg5ODhmZWMzNTYiLCJleHAiOjE3NzY5OTE1ODQsImlhdCI6MTc3Njk4Nzk4NH0.FH4JBfdUZ8DLc4kAA8iXFOPd09vkDrowyQFoDnMNX0Q
 
 ------WebKitFormBoundary
 Content-Disposition: form-data; name="file"; filename="test.txt"
@@ -41,9 +41,9 @@ JA
 
 ###
 
-GET http://localhost:8080/api/documents/c06b491c-562a-4d57-b765-e979d4e32536/download
+GET http://localhost:8080/api/documents/722427dd-bf24-4e36-b24f-7576eaecc1f0/download
 Content-Type: application/json
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHkiLCJzdWIiOiJiYTA5MzlkMC1iNGEzLTRjMjYtYTQxOC00Yzg5ODhmZWMzNTYiLCJleHAiOjE3NzY5NjY5MjcsImlhdCI6MTc3Njk2MzMyN30.E5MzPU0OTgXic2TOiYDnsTWFx_GBqFdpmB2kXKoZtZY
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHkiLCJzdWIiOiJiYTA5MzlkMC1iNGEzLTRjMjYtYTQxOC00Yzg5ODhmZWMzNTYiLCJleHAiOjE3NzY5OTE1ODQsImlhdCI6MTc3Njk4Nzk4NH0.FH4JBfdUZ8DLc4kAA8iXFOPd09vkDrowyQFoDnMNX0Q
 
 ###
 

@@ -365,61 +365,41 @@ type Status struct {
 }
 
 func (cfg *ApiConfig) Status(w http.ResponseWriter, r *http.Request) {
-	user := r.Context().Value(USERCONTEXTKEY).(database.User).ID
-	docID := r.PathValue("id")
-	docUUID, err := uuid.Parse(docID)
-	if err != nil {
-		log.Printf("Error invalid user ID: %v", err)
-		http.Error(w, "incorrect id", http.StatusBadRequest)
-		return
-	}
-
-	doc_userid, err := cfg.DB.GetDocumentUser(r.Context(), docUUID)
-	if err != nil {
-		log.Printf("Error getting userid from documentid: %v", err)
-		http.Error(w, "invalid document id", http.StatusBadRequest)
-		return
-	}
-	if doc_userid != user {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
-	//get provider from request
-	row, err := cfg.DB.GetDocumentProvider(r.Context(), docUUID)
-	providerName := row.Provider
-	client, ok := cfg.Clients[provider.Provider(providerName)]
+	document, ac, ok := cfg.asyncVerification(w, r)
 	if !ok {
-		http.Error(w, "Provider no longer available", http.StatusInternalServerError) //we cant blame user for provider not being avaialbe at this point, returning 500 is better
+		return // error has occured and it has been written in http writer so we only return
+	}
+
+	//check if status is done or error already
+	if document.Status == "done" {
+		jsonRespond(w, 200, Status{
+			Done:   true,
+			Failed: false,
+		})
 		return
 	}
-	ac, ok := client.(provider.AsyncClient)
-	if !ok {
-		log.Printf("error getting %v Async provider when checking status: %v", providerName, err)
-		http.Error(w, "Provider no longer available", http.StatusInternalServerError)
+	if document.Status == "error" {
+		jsonRespond(w, 200, Status{
+			Done:    false,
+			Failed:  true,
+			Message: document.ErrMessage.String,
+		})
 		return
 	}
 
-	//getting document
-	document, err := cfg.DB.GetDocument(r.Context(), docUUID)
-	if err != nil {
-		log.Printf("Error getting document %v: %v", docUUID, err)
-		http.Error(w, "invalid document id", http.StatusBadRequest)
-		return
-	}
-
+	//query status to provider
 	status, err := ac.CheckStatus(r.Context(), provider.AsyncResponse{DocumentID: document.ExternalID, DocumentKey: document.ExternalKey.String})
 	if err != nil {
-		log.Printf("Error checking status for document %v: %v", docUUID, err)
+		log.Printf("Error checking status for document %v: %v", document.ExternalID, err)
 		http.Error(w, "error checking status", http.StatusInternalServerError)
 		return
 	}
 
 	if status.Done {
-		_, err := cfg.DB.UpdateDocument(r.Context(), database.UpdateDocumentParams{ID: docUUID, Status: "done"})
+		_, err := cfg.DB.UpdateDocument(r.Context(), database.UpdateDocumentParams{ID: document.ID, Status: "done", ErrMessage: sql.NullString{Valid: false}})
 		if err != nil {
-			log.Printf("Error updating document %v: %v", docUUID, err)
-			http.Error(w, "error updating status", http.StatusBadRequest)
+			log.Printf("Error updating document %v: %v", document.ID, err)
+			http.Error(w, "error updating status", http.StatusInternalServerError)
 			return
 		}
 		jsonRespond(w, 200, Status{
@@ -427,10 +407,10 @@ func (cfg *ApiConfig) Status(w http.ResponseWriter, r *http.Request) {
 			Failed: false,
 		})
 	} else if status.Failed {
-		_, err := cfg.DB.UpdateDocument(r.Context(), database.UpdateDocumentParams{ID: docUUID, Status: "failed"})
+		_, err := cfg.DB.UpdateDocument(r.Context(), database.UpdateDocumentParams{ID: document.ID, Status: "error", ErrMessage: sql.NullString{String: status.Message, Valid: true}})
 		if err != nil {
-			log.Printf("Error updating document %v: %v", docUUID, err)
-			http.Error(w, "error updating status", http.StatusBadRequest)
+			log.Printf("Error updating document %v: %v", document.ID, err)
+			http.Error(w, "error updating status", http.StatusInternalServerError)
 			return
 		}
 		jsonRespond(w, 200, Status{
@@ -456,56 +436,23 @@ func (cfg *ApiConfig) DeleteDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *ApiConfig) Result(w http.ResponseWriter, r *http.Request) {
-	user := r.Context().Value(USERCONTEXTKEY).(database.User).ID
-	docID := r.PathValue("id")
-	docUUID, err := uuid.Parse(docID)
-	if err != nil {
-		log.Printf("Error invalid user ID: %v", err)
-		http.Error(w, "incorrect id", http.StatusBadRequest)
-		return
-	}
-
-	doc_userid, err := cfg.DB.GetDocumentUser(r.Context(), docUUID)
-	if err != nil {
-		log.Printf("Error getting userid from documentid: %v", err)
-		http.Error(w, "invalid document id", http.StatusBadRequest)
-		return
-	}
-	if doc_userid != user {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
-
-	//get provider from request
-	row, err := cfg.DB.GetDocumentProvider(r.Context(), docUUID)
-	providerName := row.Provider
-	client, ok := cfg.Clients[provider.Provider(providerName)]
+	document, ac, ok := cfg.asyncVerification(w, r)
 	if !ok {
-		http.Error(w, "Provider no longer available", http.StatusInternalServerError) //we cant blame user for provider not being avaialbe at this point, returning 500 is better
-		return
-	}
-	ac, ok := client.(provider.AsyncClient)
-	if !ok {
-		log.Printf("error getting %v Async provider when checking status: %v", providerName, err)
-		http.Error(w, "Provider no longer available", http.StatusInternalServerError)
-		return
-	}
-
-	document, err := cfg.DB.GetDocument(r.Context(), docUUID)
-	if err != nil {
-		log.Printf("Error getting document %v: %v", docUUID, err)
-		http.Error(w, "invalid document id", http.StatusBadRequest)
-		return
+		return // error has occured and it has been written in http writer so we only return
 	}
 
 	if document.Status != "done" && document.Status != "error" {
 		http.Error(w, "document not ready yet", http.StatusBadRequest)
 		return
 	}
+	if document.Status == "error" {
+		http.Error(w, "document translation failed", http.StatusUnprocessableEntity)
+		return
+	}
 
 	result, err := ac.GetResult(r.Context(), provider.AsyncResponse{DocumentID: document.ExternalID, DocumentKey: document.ExternalKey.String})
 	if err != nil {
-		log.Printf("Error getting result for document %v: %v", docUUID, err)
+		log.Printf("Error getting result for document %v: %v", document.ExternalID, err)
 		http.Error(w, "error getting result for document", http.StatusInternalServerError)
 		return
 	}
@@ -528,6 +475,59 @@ func (cfg *ApiConfig) Metrics(w http.ResponseWriter, r *http.Request) {
 //
 //Helper Functions
 //
+
+// TODO consolidation of sql requests instead of 3 it can be only 1
+func (cfg *ApiConfig) asyncVerification(w http.ResponseWriter, r *http.Request) (database.Document, provider.AsyncClient, bool) {
+	user := r.Context().Value(USERCONTEXTKEY).(database.User).ID
+	docID := r.PathValue("id")
+	docUUID, err := uuid.Parse(docID)
+	if err != nil {
+		log.Printf("Error parsing doc ID: %v", err)
+		http.Error(w, "invalid document id", http.StatusBadRequest)
+		return database.Document{}, nil, false
+	}
+
+	doc_userid, err := cfg.DB.GetDocumentUser(r.Context(), docUUID)
+	if err != nil {
+		log.Printf("Error getting userid from documentid: %v", err)
+		http.Error(w, "invalid document id", http.StatusBadRequest)
+		return database.Document{}, nil, false
+	}
+	if doc_userid != user {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return database.Document{}, nil, false
+	}
+
+	//get provider from request
+	row, err := cfg.DB.GetDocumentProvider(r.Context(), docUUID)
+	if err != nil {
+		log.Printf("Error getting provider from documentid: %v", err)
+		http.Error(w, "invalid document id", http.StatusBadRequest)
+		return database.Document{}, nil, false
+	}
+	providerName := row.Provider
+
+	client, ok := cfg.Clients[provider.Provider(providerName)]
+	if !ok {
+		http.Error(w, "Provider no longer available", http.StatusInternalServerError) //we cant blame user for provider not being avaialbe at this point, returning 500 is better
+		return database.Document{}, nil, false
+	}
+	ac, ok := client.(provider.AsyncClient)
+	if !ok {
+		log.Printf("error getting %v Async provider", providerName)
+		http.Error(w, "Provider no longer available", http.StatusInternalServerError)
+		return database.Document{}, nil, false
+	}
+
+	//getting document
+	document, err := cfg.DB.GetDocument(r.Context(), docUUID)
+	if err != nil {
+		log.Printf("Error getting document %v: %v", docUUID, err)
+		http.Error(w, "invalid document id", http.StatusBadRequest)
+		return database.Document{}, nil, false
+	}
+	return document, ac, true
+}
 
 // TODO: limit how large the cache can be. atm even a 1GB file will be cached
 func (cfg *ApiConfig) translateFile(w http.ResponseWriter, r *http.Request) {
