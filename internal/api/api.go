@@ -431,8 +431,26 @@ func (cfg *ApiConfig) Status(w http.ResponseWriter, r *http.Request) {
 
 func (cfg *ApiConfig) DeleteDocument(w http.ResponseWriter, r *http.Request) {
 	//validate user
+	document, _, ok := cfg.asyncVerification(w, r)
+	if !ok {
+		return // error has occured and it has been written in http writer so we only return
+	}
+
+	//check if document is in progress and cancel deletion if it is
+	if document.Status != "done" && document.Status != "error" {
+		http.Error(w, "document still in process", http.StatusBadRequest)
+		return
+	}
+
 	//delete document
+	err := cfg.DB.DeleteDocument(r.Context(), document.ID)
+	if err != nil {
+		log.Printf("Error deleteing document %v: %v", document.ExternalID, err)
+		http.Error(w, "failed document deletion", http.StatusInternalServerError)
+		return
+	}
 	// respond
+	w.WriteHeader(204)
 }
 
 func (cfg *ApiConfig) Result(w http.ResponseWriter, r *http.Request) {
